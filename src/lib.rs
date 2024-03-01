@@ -1,5 +1,19 @@
-use nibarchive::{ClassName as NibClassName, NibArchive, Object as NibObject, Value as NibValue, ValueVariant as NibValueVariant};
+use nibarchive::{NibArchive, Object as NibObject, ValueVariant as NibValueVariant};
 use plist::{Dictionary, Uid, Value};
+
+pub(crate) const ARCHIVER: &str = "NSKeyedArchiver";
+pub(crate) const ARCHIVER_VERSION: u64 = 100000;
+
+pub(crate) const ARCHIVER_KEY_NAME: &str = "$archiver";
+pub(crate) const TOP_KEY_NAME: &str = "$top";
+pub(crate) const OBJECTS_KEY_NAME: &str = "$objects";
+pub(crate) const VERSION_KEY_NAME: &str = "$version";
+pub(crate) const NULL_OBJECT_REFERENCE: &str = "$null";
+
+pub(crate) const OBJECT_CLASS_KEY: &str = "$class";
+
+pub(crate) const CLASSES_KEY: &str = "$classes";
+pub(crate) const CLASSNAME_KEY: &str = "$classname";
 
 fn nibvalue_to_plistvalue(val: NibValueVariant) -> Value {
     match val {
@@ -11,76 +25,132 @@ fn nibvalue_to_plistvalue(val: NibValueVariant) -> Value {
         NibValueVariant::Float(v) => Value::Real(v.into()),
         NibValueVariant::Double(v) => Value::Real(v),
         NibValueVariant::Data(v) => Value::Data(v),
-        NibValueVariant::Nil => Value::String("$null".into()), // TODO: check
+        NibValueVariant::Nil => Value::String(NULL_OBJECT_REFERENCE.into()), // TODO: check
         NibValueVariant::ObjectRef(v) => Value::Uid(Uid::new(v as u64)),
     }
 }
 
 fn reconstruct_object(object: &NibObject, archive: &NibArchive, add_class: bool) -> Dictionary {
     let mut dict = Dictionary::new();
+    // Add $class key
     if add_class {
+        // We add all classes object in the end of `$objects` array. To find the matching class
+        // we just add the count of regular objects to the current class uid.
         let uid = (object.class_name_index() as u64) + (archive.objects().len() as u64);
-        dict.insert("$class".into(), Value::Uid(Uid::new(uid)));
+        dict.insert(OBJECT_CLASS_KEY.into(), Value::Uid(Uid::new(uid)));
     }
     let values = object.values(archive.values());
-    for value in values {
-        let key = value.key(archive.keys()).clone();
-        let inner = nibvalue_to_plistvalue(value.value().clone());
-        dict.insert(key, inner);
+
+    if values.is_empty() {
+        return dict;
     }
+
+    let is_inlined = values[0].key(archive.keys()) == "NSInlinedValue"
+        && &NibValueVariant::Bool(true) == values[0].value();
+
+    if !is_inlined {
+        for value in values {
+            let key = value.key(archive.keys()).clone();
+            let inner = nibvalue_to_plistvalue(value.value().clone());
+            dict.insert(key, inner);
+        }
+    } else {
+        // NSArray, NSSet and NSDictionary (and their mutable versions) are inlined
+        // ((more info)[https://www.mothersruin.com/software/Archaeology/reverse/uinib.html#collections]).
+        // So we bring back their normal structure
+        let class_name = object.class_name(archive.class_names()).name();
+
+        if class_name == "NSArray"
+            || class_name == "NSMutableArray"
+            || class_name == "NSSet"
+            || class_name == "NSMutableSet"
+        {
+            let mut array = Vec::with_capacity(values.len() - 1);
+            for value in values {
+                if value.key(archive.keys()) == "UINibEncoderEmptyKey" {
+                    array.push(nibvalue_to_plistvalue(value.value().clone()))
+                }
+            }
+            dict.insert("NS.objects".into(), Value::Array(array));
+        } else if class_name == "NSDictionary" || class_name == "NSMutableDictionary" {
+            let mut dict_keys = Vec::with_capacity(values.len() / 2);
+            let mut dict_values = Vec::with_capacity(values.len() / 2);
+            let mut is_key = true;
+            for value in &values[1..] {
+                if is_key {
+                    dict_keys.push(nibvalue_to_plistvalue(value.value().clone()));
+                } else {
+                    dict_values.push(nibvalue_to_plistvalue(value.value().clone()));
+                }
+                is_key = !is_key;
+            }
+            dict.insert("NS.keys".into(), Value::Array(dict_keys));
+            dict.insert("NS.values".into(), Value::Array(dict_values));
+        } else {
+            println!("Unknown inlined object: {class_name}. The resulting file may be malformed.");
+            for value in values {
+                let key = value.key(archive.keys()).clone();
+                let inner = nibvalue_to_plistvalue(value.value().clone());
+                dict.insert(key, inner);
+            }
+        }
+    }
+
     dict
 }
 
-pub fn downgrade(archive: NibArchive) -> Value {
+/// Upgrades a NibArchive to a Cocoa Keyed Archive (NSKeyedArchive).
+pub fn upgrade(archive: &NibArchive) -> Value {
     let mut plist_root = Dictionary::new();
-    plist_root.insert("$archiver".into(), Value::String("NSKeyedArchiver".into()));
+    // Add $archiver key
+    plist_root.insert(ARCHIVER_KEY_NAME.into(), Value::String(ARCHIVER.into()));
 
     let objects = archive.objects();
-    let values = archive.values();
-    let keys = archive.keys();
     let class_names = archive.class_names();
 
-    let mut plist_classes: Vec<Value> = Vec::with_capacity(class_names.len());
-
     let mut plist_objects: Vec<Value> = Vec::with_capacity(objects.len());
-    plist_objects.push(Value::String("$null".into()));
-    for i in 1..objects.len() { // skip top object
-        plist_objects.push(Value::Dictionary(reconstruct_object(&objects[i], &archive, true)));
+
+    // It seems like all keyed archives has this as the first object
+    plist_objects.push(Value::String(NULL_OBJECT_REFERENCE.into()));
+
+    for object in objects.iter().skip(1) {
+        // skip top object
+        plist_objects.push(Value::Dictionary(reconstruct_object(
+            object,
+            archive,
+            true,
+        )));
     }
 
     for class_name in class_names {
-        let mut classes_array = vec![Value::String(class_name.name().into())];
-        for cls in class_name.fallback_classes(&class_names) {
-            classes_array.push(cls.name().into()) // TODO: check
-        }
+        let classes_array = vec![Value::String(class_name.name().into())];
+        // $classes contains the main class as the first entry and then its parent.
+        // I've seen only one example of fallback_classes: NSColor for UIColor object.
+        // However NSColor is not a parent class of UIColor.
+        /* for cls in class_name.fallback_classes(&class_names) {
+            classes_array.push(cls.name().into());
+        } */
         let mut class_obj = Dictionary::new();
-        class_obj.insert("$classes".into(), Value::Array(classes_array));
-        class_obj.insert("$classname".into(), Value::String(class_name.name().into()));
+        class_obj.insert(CLASSES_KEY.into(), Value::Array(classes_array));
+        class_obj.insert(
+            CLASSNAME_KEY.into(),
+            Value::String(class_name.name().into()),
+        );
         plist_objects.push(Value::Dictionary(class_obj));
     }
 
-    plist_root.insert("$objects".into(), Value::Array(plist_objects));
+    // Add $objects key
+    plist_root.insert(OBJECTS_KEY_NAME.into(), Value::Array(plist_objects));
 
-    let top = reconstruct_object(&objects[0], &archive, false);
-    plist_root.insert("$top".into(), Value::Dictionary(top));
+    // Add $top key
+    let top = reconstruct_object(&objects[0], archive, false);
+    plist_root.insert(TOP_KEY_NAME.into(), Value::Dictionary(top));
 
-    plist_root.insert("$version".into(), Value::Integer(100000.into()));
+    // Add $version key
+    plist_root.insert(
+        VERSION_KEY_NAME.into(),
+        Value::Integer(ARCHIVER_VERSION.into()),
+    );
 
     Value::Dictionary(plist_root)
-}
-
-
-#[cfg(test)]
-mod tests {
-    use nibarchive::NibArchive;
-
-    use crate::downgrade;
-
-
-    #[test]
-    fn b() {
-        let nib = NibArchive::from_file("./tests/View.nib").unwrap();
-        let plist = downgrade(nib);
-        plist::to_file_binary("./tests/View.plist", &plist).unwrap();
-    }
 }
