@@ -1,5 +1,8 @@
+#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))]
+
 use nibarchive::{NIBArchive, Object as NibObject, ValueVariant as NibValueVariant};
 use plist::{Dictionary, Uid, Value};
+pub use nibarchive;
 
 pub(crate) const ARCHIVER: &str = "NSKeyedArchiver";
 pub(crate) const ARCHIVER_VERSION: u64 = 100000;
