@@ -1,4 +1,4 @@
-use nibarchive::{NibArchive, Object as NibObject, ValueVariant as NibValueVariant};
+use nibarchive::{NIBArchive, Object as NibObject, ValueVariant as NibValueVariant};
 use plist::{Dictionary, Uid, Value};
 
 pub(crate) const ARCHIVER: &str = "NSKeyedArchiver";
@@ -30,7 +30,7 @@ fn nibvalue_to_plistvalue(val: NibValueVariant) -> Value {
     }
 }
 
-fn reconstruct_object(object: &NibObject, archive: &NibArchive, add_class: bool) -> Dictionary {
+fn reconstruct_object(object: &NibObject, archive: &NIBArchive, add_class: bool) -> Dictionary {
     let mut dict = Dictionary::new();
     // Add $class key
     if add_class {
@@ -66,10 +66,8 @@ fn reconstruct_object(object: &NibObject, archive: &NibArchive, add_class: bool)
             || class_name == "NSMutableSet"
         {
             let mut array = Vec::with_capacity(values.len() - 1);
-            for value in values {
-                if value.key(archive.keys()) == "UINibEncoderEmptyKey" {
-                    array.push(nibvalue_to_plistvalue(value.value().clone()))
-                }
+            for value in &values[1..] {
+                array.push(nibvalue_to_plistvalue(value.value().clone()));
             }
             dict.insert("NS.objects".into(), Value::Array(array));
         } else if class_name == "NSDictionary" || class_name == "NSMutableDictionary" {
@@ -100,7 +98,7 @@ fn reconstruct_object(object: &NibObject, archive: &NibArchive, add_class: bool)
 }
 
 /// Upgrades a NibArchive to a Cocoa Keyed Archive (NSKeyedArchive).
-pub fn upgrade(archive: &NibArchive) -> Value {
+pub fn upgrade(archive: &NIBArchive) -> Value {
     let mut plist_root = Dictionary::new();
     // Add $archiver key
     plist_root.insert(ARCHIVER_KEY_NAME.into(), Value::String(ARCHIVER.into()));
@@ -115,11 +113,7 @@ pub fn upgrade(archive: &NibArchive) -> Value {
 
     for object in objects.iter().skip(1) {
         // skip top object
-        plist_objects.push(Value::Dictionary(reconstruct_object(
-            object,
-            archive,
-            true,
-        )));
+        plist_objects.push(Value::Dictionary(reconstruct_object(object, archive, true)));
     }
 
     for class_name in class_names {
