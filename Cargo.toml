@@ -6,5 +6,6 @@ license = "MIT OR Apache-2.0"
 authors = ["Michael Wright <maiklpolkovnikov@gmail.com>"]
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
 nibarchive = {version = "*", path = "../nibarchive"}
 plist = "1.6"
