@@ -51,56 +51,64 @@ fn reconstruct_object(object: &NibObject, archive: &NIBArchive, add_class: bool)
     let is_inlined = values[0].key(archive.keys()) == "NSInlinedValue"
         && &NibValueVariant::Bool(true) == values[0].value();
 
-    if !is_inlined {
+    if is_inlined {
+        return reconstruct_inlined_object(object, archive, dict);
+    }
+
+    // Regular object
+    for value in values {
+        let key = value.key(archive.keys()).clone();
+        let inner = nibvalue_to_plistvalue(value.value().clone());
+        dict.insert(key, inner);
+    }
+    dict
+}
+
+/// NSArray, NSSet and NSDictionary (and their mutable versions) are inlined
+/// ([more info](https://www.mothersruin.com/software/Archaeology/reverse/uinib.html#collections)).
+/// So we bring back their normal structure.
+fn reconstruct_inlined_object(object: &NibObject, archive: &NIBArchive, mut dict: Dictionary) -> Dictionary {
+    let values = object.values(archive.values());
+    let class_name = object.class_name(archive.class_names()).name();
+
+    if class_name == "NSArray"
+        || class_name == "NSMutableArray"
+        || class_name == "NSSet"
+        || class_name == "NSMutableSet"
+    {
+        let mut array = Vec::with_capacity(values.len() - 1);
+        for value in &values[1..] {
+            array.push(nibvalue_to_plistvalue(value.value().clone()));
+        }
+        dict.insert("NS.objects".into(), Value::Array(array));
+    }
+    else if class_name == "NSDictionary" || class_name == "NSMutableDictionary" {
+        let mut dict_keys = Vec::with_capacity(values.len() / 2);
+        let mut dict_values = Vec::with_capacity(values.len() / 2);
+        let mut is_key = true;
+        for value in &values[1..] {
+            if is_key {
+                dict_keys.push(nibvalue_to_plistvalue(value.value().clone()));
+            } else {
+                dict_values.push(nibvalue_to_plistvalue(value.value().clone()));
+            }
+            is_key = !is_key;
+        }
+        dict.insert("NS.keys".into(), Value::Array(dict_keys));
+        dict.insert("NS.values".into(), Value::Array(dict_values));
+    }
+    else {
+        println!("Unknown inlined object: {class_name}. The resulting file may be malformed.");
         for value in values {
             let key = value.key(archive.keys()).clone();
             let inner = nibvalue_to_plistvalue(value.value().clone());
             dict.insert(key, inner);
         }
-    } else {
-        // NSArray, NSSet and NSDictionary (and their mutable versions) are inlined
-        // ((more info)[https://www.mothersruin.com/software/Archaeology/reverse/uinib.html#collections]).
-        // So we bring back their normal structure
-        let class_name = object.class_name(archive.class_names()).name();
-
-        if class_name == "NSArray"
-            || class_name == "NSMutableArray"
-            || class_name == "NSSet"
-            || class_name == "NSMutableSet"
-        {
-            let mut array = Vec::with_capacity(values.len() - 1);
-            for value in &values[1..] {
-                array.push(nibvalue_to_plistvalue(value.value().clone()));
-            }
-            dict.insert("NS.objects".into(), Value::Array(array));
-        } else if class_name == "NSDictionary" || class_name == "NSMutableDictionary" {
-            let mut dict_keys = Vec::with_capacity(values.len() / 2);
-            let mut dict_values = Vec::with_capacity(values.len() / 2);
-            let mut is_key = true;
-            for value in &values[1..] {
-                if is_key {
-                    dict_keys.push(nibvalue_to_plistvalue(value.value().clone()));
-                } else {
-                    dict_values.push(nibvalue_to_plistvalue(value.value().clone()));
-                }
-                is_key = !is_key;
-            }
-            dict.insert("NS.keys".into(), Value::Array(dict_keys));
-            dict.insert("NS.values".into(), Value::Array(dict_values));
-        } else {
-            println!("Unknown inlined object: {class_name}. The resulting file may be malformed.");
-            for value in values {
-                let key = value.key(archive.keys()).clone();
-                let inner = nibvalue_to_plistvalue(value.value().clone());
-                dict.insert(key, inner);
-            }
-        }
     }
-
     dict
 }
 
-/// Upgrades a NibArchive to a Cocoa Keyed Archive (NSKeyedArchive).
+/// Converts a NIB Archive to a Cocoa Keyed Archive (NSKeyedArchive).
 pub fn upgrade(archive: &NIBArchive) -> Value {
     let mut plist_root = Dictionary::new();
     // Add $archiver key
