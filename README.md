@@ -1,6 +1,6 @@
 # NIB Archive Upgrade
 
-Convert NIB Archive `.nib` to Apple's Cocoa Keyed Archive (NSKeyedArchive) `.plist`.
+Convert Apple's NIB Archive `.nib` to Cocoa Keyed Archive (NSKeyedArchive) `.plist`.
 
 NIB Archives are used by UIKit (since iOS 6.0) and AppKit for building GUIs.
 In the past those frameworks actually used Cocoa Keyed Archives to
@@ -10,6 +10,12 @@ for that.
 NIB Archive is actually very similar to a regular Keyed Archive:
 it also contains objects, values, references, etc. So it's possible to "upgrade"
 NIB archives back to Keyed Archives.
+
+The conversion is lossless *most of the times*. A NIB Archive's class may contain
+`fallback classes` that are not represented in Keyed Archives and cannot be
+included in the resulting file.
+One example that I was able to find is the `NSColor` fallback class of the
+`UIColor` class.
 
 ## Why?
 
