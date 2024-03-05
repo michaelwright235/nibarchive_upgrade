@@ -24,8 +24,10 @@ is actually better documented and has more tools to work with it.
 
 ## Use
 
-The following example reads the `foo.nib` NIB Archive, converts it and saves as
-a Keyed Archive under the `foo.plist` name.
+The following example converts the `foo.nib` NIB Archive to the `foo.plist`
+Cocoa Keyed Archive.
+
+### Using a Rust Library
 
 ```rust
 use nibarchive_upgrade::upgrade;
@@ -35,4 +37,10 @@ use plist::Value;
 let archive: NIBArchive = NIBArchive::from_file("./foo.nib")?;
 let plist: Value = upgrade(&archive);
 plist.to_file_binary("./foo.plist")?;
+```
+
+### Using an executable
+
+```bash
+./nibarchive_upgrade foo.nib foo.plist
 ```
