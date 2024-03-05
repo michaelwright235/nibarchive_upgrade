@@ -1,8 +1,8 @@
 #![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))]
 
+pub use nibarchive;
 use nibarchive::{NIBArchive, Object as NibObject, ValueVariant as NibValueVariant};
 use plist::{Dictionary, Uid, Value};
-pub use nibarchive;
 
 pub(crate) const ARCHIVER: &str = "NSKeyedArchiver";
 pub(crate) const ARCHIVER_VERSION: u64 = 100000;
@@ -67,7 +67,11 @@ fn reconstruct_object(object: &NibObject, archive: &NIBArchive, add_class: bool)
 /// NSArray, NSSet and NSDictionary (and their mutable versions) are inlined
 /// ([more info](https://www.mothersruin.com/software/Archaeology/reverse/uinib.html#collections)).
 /// So we bring back their normal structure.
-fn reconstruct_inlined_object(object: &NibObject, archive: &NIBArchive, mut dict: Dictionary) -> Dictionary {
+fn reconstruct_inlined_object(
+    object: &NibObject,
+    archive: &NIBArchive,
+    mut dict: Dictionary,
+) -> Dictionary {
     let values = object.values(archive.values());
     let class_name = object.class_name(archive.class_names()).name();
 
@@ -81,8 +85,7 @@ fn reconstruct_inlined_object(object: &NibObject, archive: &NIBArchive, mut dict
             array.push(nibvalue_to_plistvalue(value.value().clone()));
         }
         dict.insert("NS.objects".into(), Value::Array(array));
-    }
-    else if class_name == "NSDictionary" || class_name == "NSMutableDictionary" {
+    } else if class_name == "NSDictionary" || class_name == "NSMutableDictionary" {
         let mut dict_keys = Vec::with_capacity(values.len() / 2);
         let mut dict_values = Vec::with_capacity(values.len() / 2);
         let mut is_key = true;
@@ -96,8 +99,7 @@ fn reconstruct_inlined_object(object: &NibObject, archive: &NIBArchive, mut dict
         }
         dict.insert("NS.keys".into(), Value::Array(dict_keys));
         dict.insert("NS.values".into(), Value::Array(dict_values));
-    }
-    else {
+    } else {
         println!("Unknown inlined object: {class_name}. The resulting file may be malformed.");
         for value in values {
             let key = value.key(archive.keys()).clone();
