@@ -3,9 +3,8 @@
 Convert Apple's NIB Archive `.nib` to Cocoa Keyed Archive (NSKeyedArchive) `.plist`.
 
 NIB Archives are used by UIKit (since iOS 6.0) and AppKit for building GUIs.
-In the past those frameworks actually used Cocoa Keyed Archives to
-store this data and some reason Apple decided to invent a NIB Archive format
-for that.
+In the past UIKit and AppKit actually used Cocoa Keyed Archives to
+store this data. But later Apple decided to replace it with NIB Archive.
 
 NIB Archive is actually very similar to a regular Keyed Archive:
 it also contains objects, values, references, etc. So it's possible to "upgrade"
