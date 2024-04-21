@@ -7,5 +7,5 @@ authors = ["Michael Wright <maiklpolkovnikov@gmail.com>"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-nibarchive = {version = "*", path = "../nibarchive"}
+nibarchive = { git = "https://github.com/michaelwright235/nibarchive" }
 plist = "1.6"
